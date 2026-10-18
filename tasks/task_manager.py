@@ -10,6 +10,9 @@ Her fonksiyonun pass kısmını doldur. Testleri çalıştır, hepsi geçene kad
 iterate et: `python watch.py` veya `pytest tests/test_question.py -v`
 """
 
+import numpy as np
+import pandas as pd
+
 
 # 1. fake_or_real_news.csv veri setini indir (cache'li)
 def fetch_news_data(cache_dir='data'):
@@ -35,7 +38,22 @@ def fetch_news_data(cache_dir='data'):
         with open(data_path, 'wb') as f: f.write(r.content)
     URL: https://raw.githubusercontent.com/lutzhamel/fake-news/master/data/fake_or_real_news.csv
     """
-    pass
+    import os
+    import requests
+
+    os.makedirs(cache_dir, exist_ok=True)
+    data_path = os.path.join(cache_dir, 'fake_or_real_news.csv')
+
+    if os.path.exists(data_path):
+        return data_path
+
+    url = 'https://raw.githubusercontent.com/lutzhamel/fake-news/master/data/fake_or_real_news.csv'
+    r = requests.get(url, timeout=120)
+    r.raise_for_status()
+    with open(data_path, 'wb') as f:
+        f.write(r.content)
+
+    return data_path
 
 
 # 2. CSV'yi DataFrame olarak yükle
@@ -57,7 +75,9 @@ def load_news_data(path):
       veya read_csv'de index_col=0 / usecols kullan
     - Son olarak df[['title', 'text', 'label']] döndür
     """
-    pass
+    df = pd.read_csv(path)
+    df = df.drop(columns=[df.columns[0]])
+    return df[['title', 'text', 'label']]
 
 
 # 3. Veriyi keşfet — label dağılımı
@@ -77,7 +97,17 @@ def explore_data(df):
     - df['label'].value_counts() → 'REAL' ve 'FAKE' sayıları
     - total = len(df)
     """
-    pass
+    total = len(df)
+    counts = df['label'].value_counts()
+    real_count = int(counts.get('REAL', 0))
+    fake_count = int(counts.get('FAKE', 0))
+    fake_rate = fake_count / total
+    return {
+        'total': total,
+        'real_count': real_count,
+        'fake_count': fake_count,
+        'fake_rate': fake_rate,
+    }
 
 
 # 4. Label'ları encode et (FAKE/REAL → 1/0)
@@ -96,7 +126,9 @@ def encode_labels(df):
     - out = df.copy()
     - out['target'] = out['label'].map({'FAKE': 1, 'REAL': 0}).astype(int)
     """
-    pass
+    out = df.copy()
+    out['target'] = out['label'].map({'FAKE': 1, 'REAL': 0}).astype(int)
+    return out
 
 
 # 5. Train/test split (stratified)
@@ -114,7 +146,8 @@ def split_data(X, y):
 
     İpucu: from sklearn.model_selection import train_test_split
     """
-    pass
+    from sklearn.model_selection import train_test_split
+    return train_test_split(X, y, test_size=0.2, stratify=y, random_state=42)
 
 
 # 6. Bag of Words (CountVectorizer) + MultinomialNB pipeline kur
@@ -142,7 +175,14 @@ def build_bow_pipeline():
     - Pipeline ham string listesini alır, CountVectorizer otomatik vektörize eder.
     - NOT: Burada CountVectorizer kullan (bag of words). TfidfVectorizer DEĞİL.
     """
-    pass
+    from sklearn.feature_extraction.text import CountVectorizer
+    from sklearn.naive_bayes import MultinomialNB
+    from sklearn.pipeline import Pipeline
+
+    return Pipeline([
+        ('cv', CountVectorizer(stop_words='english', max_features=10000)),
+        ('nb', MultinomialNB()),
+    ])
 
 
 # 7. Modeli eğit
@@ -160,7 +200,8 @@ def train_model(pipe, X_train, y_train):
 
     İpucu: pipe.fit(X_train, y_train); return pipe
     """
-    pass
+    pipe.fit(X_train, y_train)
+    return pipe
 
 
 # 8. Modeli değerlendir
@@ -183,7 +224,17 @@ def evaluate_model(pipe, X_test, y_test):
       f1_score, confusion_matrix
     - precision/recall/f1'de zero_division=0 kullan
     """
-    pass
+    from sklearn.metrics import (accuracy_score, precision_score,
+                                 recall_score, f1_score, confusion_matrix)
+
+    y_pred = pipe.predict(X_test)
+    return {
+        'accuracy': accuracy_score(y_test, y_pred),
+        'precision': precision_score(y_test, y_pred, zero_division=0),
+        'recall': recall_score(y_test, y_pred, zero_division=0),
+        'f1': f1_score(y_test, y_pred, zero_division=0),
+        'confusion_matrix': confusion_matrix(y_test, y_pred),
+    }
 
 
 # 9. Tek bir haber için tahmin yap
@@ -207,7 +258,14 @@ def predict_article(pipe, text):
     - proba = pipe.predict_proba([text])[0, 1]  # pozitif (FAKE) sınıf olasılığı
     - pred = int(pipe.predict([text])[0])
     """
-    pass
+    pred = int(pipe.predict([text])[0])
+    proba = float(pipe.predict_proba([text])[0, 1])
+    label = 'FAKE' if pred == 1 else 'REAL'
+    return {
+        'prediction': pred,
+        'label': label,
+        'fake_probability': proba,
+    }
 
 
 # 10. En "fake" kelimeler
@@ -233,7 +291,12 @@ def top_fake_words(pipe, n=10):
     - top_idx = np.argsort(diff)[::-1][:n]  # büyükten küçüğe ilk n
     - [feature_names[i] for i in top_idx]
     """
-    pass
+    cv = pipe.named_steps['cv']
+    nb = pipe.named_steps['nb']
+    feature_names = cv.get_feature_names_out()
+    diff = nb.feature_log_prob_[1] - nb.feature_log_prob_[0]
+    top_idx = np.argsort(diff)[::-1][:n]
+    return [feature_names[i] for i in top_idx]
 
 
 # 11. En "real" kelimeler
@@ -252,7 +315,12 @@ def top_real_words(pipe, n=10):
     - diff = nb.feature_log_prob_[0] - nb.feature_log_prob_[1]  # REAL - FAKE
     - top_idx = np.argsort(diff)[::-1][:n]
     """
-    pass
+    cv = pipe.named_steps['cv']
+    nb = pipe.named_steps['nb']
+    feature_names = cv.get_feature_names_out()
+    diff = nb.feature_log_prob_[0] - nb.feature_log_prob_[1]
+    top_idx = np.argsort(diff)[::-1][:n]
+    return [feature_names[i] for i in top_idx]
 
 
 # 12. Bag of Words vs TF-IDF karşılaştırması
@@ -275,7 +343,31 @@ def compare_bow_vs_tfidf(X_train, X_test, y_train, y_test):
     - from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
     - İki ayrı Pipeline kur, fit et, pipe.predict(X_test) → f1_score.
     """
-    pass
+    from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
+    from sklearn.naive_bayes import MultinomialNB
+    from sklearn.pipeline import Pipeline
+    from sklearn.metrics import f1_score
+
+    bow_pipe = Pipeline([
+        ('cv', CountVectorizer(stop_words='english', max_features=10000)),
+        ('nb', MultinomialNB()),
+    ])
+    bow_pipe.fit(X_train, y_train)
+    bow_pred = bow_pipe.predict(X_test)
+    bow_f1 = f1_score(y_test, bow_pred, zero_division=0)
+
+    tfidf_pipe = Pipeline([
+        ('tfidf', TfidfVectorizer(stop_words='english', max_features=10000)),
+        ('nb', MultinomialNB()),
+    ])
+    tfidf_pipe.fit(X_train, y_train)
+    tfidf_pred = tfidf_pipe.predict(X_test)
+    tfidf_f1 = f1_score(y_test, tfidf_pred, zero_division=0)
+
+    return {
+        'bow_f1': bow_f1,
+        'tfidf_f1': tfidf_f1,
+    }
 
 
 # 13. Toplu tahmin
@@ -292,7 +384,7 @@ def predict_batch(pipe, articles):
 
     İpucu: [predict_article(pipe, a) for a in articles]
     """
-    pass
+    return [predict_article(pipe, a) for a in articles]
 
 
 # 14. Tüm pipeline'ı uçtan uca çalıştır
@@ -323,7 +415,34 @@ def run_pipeline():
             'sample_real_pred': dict (predict_article çıktısı)
         }
     """
-    pass
+    path = fetch_news_data()
+    df = load_news_data(path)
+    stats = explore_data(df)
+    df = encode_labels(df)
+    X_train, X_test, y_train, y_test = split_data(df['text'], df['target'])
+    pipe = build_bow_pipeline()
+    pipe = train_model(pipe, X_train, y_train)
+    metrics = evaluate_model(pipe, X_test, y_test)
+    fake_words = top_fake_words(pipe)
+
+    sample_fake_pred = predict_article(
+        pipe,
+        "SHOCKING! Secret elite cabal exposed, mainstream media won't tell "
+        "you the truth they are hiding. Share before they delete this!"
+    )
+    sample_real_pred = predict_article(
+        pipe,
+        "The central bank announced on Tuesday that interest rates would "
+        "remain unchanged, citing stable inflation and steady employment."
+    )
+
+    return {
+        'fake_rate': stats['fake_rate'],
+        'test_f1': metrics['f1'],
+        'top_fake_word': fake_words[0],
+        'sample_fake_pred': sample_fake_pred,
+        'sample_real_pred': sample_real_pred,
+    }
 
 
 if __name__ == "__main__":
